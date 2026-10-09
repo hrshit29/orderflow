@@ -1,0 +1,54 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: notification-service
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/notification_db?createDatabaseIfNotExist=true}
+    username: ${DB_USERNAME:orderflow}
+    password: ${DB_PASSWORD:orderflow}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  data:
+    web:
+      pageable:
+        max-page-size: 100
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: com.orderflow.events
+    producer:
+      acks: all
+
+notification:
+  channel: ${NOTIFICATION_CHANNEL:log}   # "log" prints to console, "email" sends via SMTP (MailHog in docker-compose)
+  from: no-reply@orderflow.local
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    mail:
+      enabled: false   # SMTP outage must not mark the pod unhealthy; retries + DLQ handle it
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

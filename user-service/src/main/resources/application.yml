@@ -1,0 +1,36 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: user-service
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/user_db?createDatabaseIfNotExist=true}
+    username: ${DB_USERNAME:orderflow}
+    password: ${DB_PASSWORD:orderflow}
+  jpa:
+    hibernate:
+      ddl-auto: update   # use Flyway/Liquibase migrations before production
+    open-in-view: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true   # /actuator/health/liveness and /readiness for Kubernetes
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
