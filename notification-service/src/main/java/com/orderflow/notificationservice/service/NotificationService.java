@@ -29,6 +29,7 @@ public class NotificationService {
     @Transactional
     public void saveContact(Long userId, String email, String fullName) {
         contactRepository.save(new UserContact(userId, email, fullName));
+        log.info("Saved contact for user {} ({})", userId, email);
     }
 
     /**
@@ -37,6 +38,7 @@ public class NotificationService {
      * Throws on delivery failure so the Kafka error handler retries and, finally, dead-letters it.
      */
     public void notify(String eventKey, String eventType, Long userId, Function<String, Message> template) {
+        log.info("Received {} for user {}", eventKey, userId);
         if (logRepository.existsByEventKeyAndStatus(eventKey, NotificationLog.Status.SENT)) {
             log.info("Duplicate event {} — already notified, skipping", eventKey);
             return;
@@ -46,11 +48,13 @@ public class NotificationService {
             Message msg = template.apply("customer");
             record(eventKey, eventType, userId, null, msg, NotificationLog.Status.SKIPPED,
                     "No contact details known for user " + userId);
+            log.warn("Skipped {}: no contact details for user {}", eventKey, userId);
             return;
         }
         Message msg = template.apply(contact.get().getFullName());
         sender.send(contact.get().getEmail(), msg.subject(), msg.body());
         record(eventKey, eventType, userId, contact.get().getEmail(), msg, NotificationLog.Status.SENT, null);
+        log.info("Sent {} to {}", eventKey, contact.get().getEmail());
     }
 
     /** Called by the dead-letter recoverer once all retries are exhausted. */

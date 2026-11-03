@@ -10,6 +10,8 @@ x-service-env: &service-env
 x-service-deps: &service-deps
   mysql:
     condition: service_healthy
+  mysql-init:
+    condition: service_completed_successfully
   kafka:
     condition: service_healthy
 
@@ -29,6 +31,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  # Runs init.sql on every `up`, not just when the data volume is first created,
+  # so a new service's database appears without wiping existing data. Idempotent (IF NOT EXISTS).
+  mysql-init:
+    image: mysql:8.4
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./infra/mysql/init.sql:/init.sql:ro
+    entrypoint: ["sh", "-c", "mysql -h mysql -uroot -proot < /init.sql && echo 'databases ready'"]
+    restart: "no"
 
   kafka:
     image: apache/kafka:3.9.1   # KRaft mode — no Zookeeper needed
@@ -80,6 +94,23 @@ services:
     environment:
       <<: *service-env
       DB_URL: jdbc:mysql://mysql:3306/order_db
+    depends_on: *service-deps
+
+  inventory-service:
+    build: { context: ., args: { SERVICE: inventory-service } }
+    ports: ["8083:8083"]
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/inventory_db
+    depends_on: *service-deps
+
+  payment-service:
+    build: { context: ., args: { SERVICE: payment-service } }
+    ports: ["8084:8084"]
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/payment_db
+      PAYMENT_DECLINE_ABOVE: 10000   # simulated gateway declines bigger charges
     depends_on: *service-deps
 
   notification-service:

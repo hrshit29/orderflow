@@ -33,6 +33,11 @@ spring:
         spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.orderflow.events
 
+orders:
+  # A PENDING/CONFIRMED order with no progress for this long is cancelled (lost event, service down too long).
+  saga-timeout: ${ORDER_SAGA_TIMEOUT:15m}
+  timeout-check-interval-ms: ${ORDER_TIMEOUT_CHECK_MS:60000}
+
 management:
   endpoints:
     web:

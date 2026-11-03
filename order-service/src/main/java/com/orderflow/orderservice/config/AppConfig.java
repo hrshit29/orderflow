@@ -6,11 +6,13 @@ import io.swagger.v3.oas.models.info.Info;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.FixedBackOff;
 
 @Configuration
+@EnableScheduling
 public class AppConfig {
 
     /** Creates every topic this service produces or consumes, so listeners start cleanly. */

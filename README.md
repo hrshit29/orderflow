@@ -18,6 +18,8 @@ client ──► user-service (8081) ──► user-registered ─────�
 | `common-events` | Event records, topic names, shared `PageResponse` — the contract between services |
 | `user-service` | Register / login / get / update / delete / paginated search. BCrypt passwords. Publishes `user-registered` |
 | `order-service` | Create / get / cancel / paginated list filtered by user, status, date range. Publishes `order-created`, `order-cancelled`. Consumes `stock-*` and `payment-*` (ready for Phase 2) |
+| `inventory-service` | Products + stock. Consumes `order-created` → reserves every line or nothing (row lock, `SELECT … FOR UPDATE`) → publishes `stock-reserved` / `stock-insufficient`. Consumes `order-cancelled` → puts reserved stock back. Seeds demo products 7, 101, 205 |
+| `payment-service` | Consumes `stock-reserved` → charges a simulated gateway (declines above Rs. 10,000; outage switch for demos) → publishes `payment-success` / `payment-failed`. Consumes `order-cancelled` → refunds a charged order, or never charges one cancelled first |
 | `notification-service` | Consumes events, sends email, logs every notification to `notification_log`, `GET /api/v1/notifications` history |
 
 ## Design decisions worth talking about in interviews
@@ -30,6 +32,14 @@ client ──► user-service (8081) ──► user-registered ─────�
 - **Event-carried state transfer** — order events carry only `userId`. Notification Service keeps its own `user_contacts` table built from `user-registered`, instead of calling User Service synchronously.
 - **Database per service** — `user_db`, `order_db`, `notification_db`.
 - **Explicit `PageResponse`** instead of serialising Spring's `Page` — a stable API contract; `max-page-size: 100` caps abuse.
+- **All-or-nothing stock reservation** — Inventory locks every product row in the order (`PESSIMISTIC_WRITE`, in id order to avoid deadlocks), checks all lines, then reserves. Two orders racing for the last unit are serialised by the lock, so stock never goes negative.
+- **Compensation** — a cancelled order (by the user, or after `stock-insufficient` / `payment-failed`) publishes `order-cancelled`; Inventory returns the held stock. One `stock_reservations` row per order (RESERVED / REJECTED / RELEASED) makes this idempotent.
+- **Out-of-order events** — `order-created` and `order-cancelled` are different topics, so a cancel can arrive first. Inventory records a RELEASED tombstone and ignores the late `order-created`.
+- **Choreographed saga** — `order-created → stock-reserved → payment-success` ends in `PAID`; `stock-insufficient` or `payment-failed` cancels the order, and `order-cancelled` makes Inventory return the stock. No central orchestrator.
+- **Gateway call outside the DB transaction** — Payment writes a `PENDING` row (unique per order), calls the gateway with no locks held, then records the outcome. A crash or timeout leaves `PENDING`; the Kafka retry reuses the same idempotency key (`order-{id}`), so a customer is never charged twice.
+- **Cancel vs. charge races** — cancel before charge: tombstone, never charged. Cancel mid-charge: row flips to `CANCELLED` and the completed charge is refunded instead of publishing success. Cancel after charge: refunded.
+- **Saga never stalls** — if the gateway stays down through all retries (1s/2s/4s), the recoverer fails the payment and publishes `payment-failed`, so the order is cancelled and stock released instead of sitting in `CONFIRMED`. Known gap: a timed-out charge may have succeeded at the gateway; production adds a reconciliation job.
+- **Saga timeout** — a scheduled job in Order Service cancels any order stuck in `PENDING`/`CONFIRMED` for 15 min (lost event, a service down longer than Kafka's 7-day retention). The cancel publishes `order-cancelled`, so stock and payment are compensated as usual.
 - **Kubernetes-ready probes** — `/actuator/health/liveness` and `/readiness` are enabled.
 
 ## Run it
@@ -51,6 +61,8 @@ mvn clean install
 |---|---|
 | http://localhost:8081/swagger-ui.html | User Service API |
 | http://localhost:8082/swagger-ui.html | Order Service API |
+| http://localhost:8083/swagger-ui.html | Inventory Service API |
+| http://localhost:8084/swagger-ui.html | Payment Service API |
 | http://localhost:8085/swagger-ui.html | Notification Service API |
 | http://localhost:8090 | Kafka UI — topics, messages, consumer groups, DLQ |
 | http://localhost:8025 | Mailpit — emails that were "sent" |
@@ -76,7 +88,9 @@ curl -s -X POST localhost:8082/api/v1/orders/1/cancel -H 'Content-Type: applicat
 curl -s 'localhost:8085/api/v1/notifications?userId=1'
 ```
 
-**Simulate the Phase-2 Inventory Service by hand:** in Kafka UI → Topics → `stock-reserved` → Produce Message, set key `2`, header `{"__TypeId__":"com.orderflow.events.StockReservedEvent"}`, value `{"orderId":2,"userId":1,"totalAmount":10,"occurredAt":"2026-10-09T10:00:00Z"}`. Order 2 moves `PENDING → CONFIRMED`.
+**Inventory in action:** place an order for 6 keyboards (`productId` 205, only 5 in stock) → order goes `CANCELLED` with reason *Insufficient stock*. Place one for 2 mice (101) → `CONFIRMED`; `GET localhost:8083/api/v1/products/101` shows 2 reserved; cancel it → back to 0 reserved.
+
+**Payment in action:** a small order ends `PAID` (`GET localhost:8084/api/v1/payments/{orderId}` → `SUCCEEDED`). An order over Rs. 10,000 (e.g. 3 × productId 205) is declined → order `CANCELLED`, stock returned, two emails. Gateway outage: `POST localhost:8084/api/v1/payments/gateway/outage?enabled=true`, place an order, watch `docker compose logs -f payment-service` retry 3 times then fail the payment; turn it off with `enabled=false`.
 
 ### See the DLQ work
 ```bash
@@ -98,7 +112,7 @@ Unit tests cover: password hashing + event publishing, duplicate email, order to
 ## Roadmap
 
 - [x] **Phase 1** — User, Order, Notification services · Kafka · retry/DLQ · pagination · Swagger · Docker Compose
-- [ ] **Phase 2** — Inventory + Payment services (full saga: `order-created → stock-reserved → payment-success/failed`), compensation (restock on cancel)
+- [x] **Phase 2** — Inventory + Payment services (full saga: `order-created → stock-reserved → payment-success/failed`), compensation (restock on cancel)
 - [ ] **Phase 3** — Spring Cloud Gateway + JWT auth, Eureka, aggregated Swagger
 - [ ] **Phase 4** — Kubernetes manifests (Deployments, Services, ConfigMaps/Secrets, Ingress, HPA, probes), then Helm
 - [ ] **Phase 5** — Flyway migrations, Testcontainers integration tests, transactional outbox, Prometheus + Grafana, keyset pagination
