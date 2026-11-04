@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  labels: { app: api-gateway }
+spec:
+  type: LoadBalancer   # Docker Desktop publishes this on localhost:8080
+  selector: { app: api-gateway }
+  ports: [ { name: http, port: 8080, targetPort: 8080 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  labels: { app: api-gateway, part-of: orderflow }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: api-gateway }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }   # zero-downtime deploys
+  template:
+    metadata:
+      labels: { app: api-gateway, part-of: orderflow }
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-dependencies
+          image: busybox:1.36
+          command: [ "sh", "-c", "until nc -z user-service 8081; do echo waiting for services; sleep 3; done" ]
+      containers:
+        - name: api-gateway
+          image: orderflow-api-gateway:latest      # built locally by `docker compose build`
+          imagePullPolicy: IfNotPresent       # use the local image, don't pull from a registry
+          ports: [ { containerPort: 8080 } ]
+          env:
+            - name: USER_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: orderflow-config, key: USER_SERVICE_URL } }
+            - name: ORDER_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: orderflow-config, key: ORDER_SERVICE_URL } }
+            - name: INVENTORY_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: orderflow-config, key: INVENTORY_SERVICE_URL } }
+            - name: PAYMENT_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: orderflow-config, key: PAYMENT_SERVICE_URL } }
+            - name: NOTIFICATION_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: orderflow-config, key: NOTIFICATION_SERVICE_URL } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: orderflow-secrets, key: JWT_SECRET } }
+          # Spring Boot exposes these when management.endpoint.health.probes.enabled=true
+          startupProbe:          # up to 3 min to boot before liveness kicks in
+            httpGet: { path: /actuator/health/liveness, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:         # restart the container if the JVM is wedged
+            httpGet: { path: /actuator/health/liveness, port: 8080 }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:        # only send traffic once DB/Kafka connections are up
+            httpGet: { path: /actuator/health/readiness, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 200m, memory: 384Mi }
+            limits: { memory: 768Mi }       # JVM uses 75% of this (MaxRAMPercentage in the Dockerfile)
+---
+# Needs metrics-server (see k8s/README.md). Scales on CPU between 2 and 4 pods.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: api-gateway }
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

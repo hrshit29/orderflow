@@ -1,0 +1,31 @@
+# Example production overrides:  helm upgrade --install orderflow helm/orderflow -n orderflow -f values-prod.yaml
+image:
+  registry: ghcr.io/hrshit29
+  tag: "1.0.0"               # immutable tags in prod, never :latest
+  pullPolicy: IfNotPresent
+
+secrets:
+  existingSecret: orderflow-secrets   # created by External Secrets / Sealed Secrets, not by this chart
+
+mysql:
+  enabled: false
+  host: orderflow.xxxxxx.ap-south-1.rds.amazonaws.com   # managed MySQL
+kafka:
+  enabled: false
+  bootstrapServers: b-1.orderflow.xxxxxx.kafka.ap-south-1.amazonaws.com:9092   # managed Kafka
+mailpit:
+  enabled: false
+
+services:
+  api-gateway:
+    serviceType: ClusterIP   # traffic arrives through the Ingress instead
+  notification-service:
+    env:
+      NOTIFICATION_CHANNEL: email
+      MAIL_HOST: email-smtp.ap-south-1.amazonaws.com
+      MAIL_PORT: "587"
+
+ingress:
+  enabled: true
+  className: nginx
+  host: api.orderflow.example.com

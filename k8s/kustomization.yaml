@@ -1,0 +1,17 @@
+# kubectl apply -k k8s
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: orderflow
+resources:
+  - namespace.yaml
+  - config.yaml
+  - infra/mysql.yaml
+  - infra/kafka.yaml
+  - infra/mailpit.yaml
+  - apps/user-service.yaml
+  - apps/order-service.yaml
+  - apps/inventory-service.yaml
+  - apps/payment-service.yaml
+  - apps/notification-service.yaml
+  - apps/api-gateway.yaml
+  - ingress.yaml

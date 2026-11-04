@@ -1,0 +1,72 @@
+{{- if .Values.mysql.enabled }}
+{{- $secret := include "orderflow.secretName" . }}
+{{- $labels := include "orderflow.labels" (dict "name" "mysql" "root" $) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init
+  labels: {{- $labels | nindent 4 }}
+data:
+  # One database per service, generated from .Values.services
+  init.sql: |
+    {{- range $name, $svc := .Values.services }}
+    {{- if $svc.database }}
+    CREATE DATABASE IF NOT EXISTS {{ $svc.database }};
+    GRANT ALL PRIVILEGES ON {{ $svc.database }}.* TO '{{ $.Values.secrets.values.DB_USERNAME }}'@'%';
+    {{- end }}
+    {{- end }}
+    FLUSH PRIVILEGES;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels: {{- $labels | nindent 4 }}
+spec:
+  selector: { app: mysql }
+  ports: [ { port: 3306 } ]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  labels: {{- $labels | nindent 4 }}
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels: { app: mysql }
+  template:
+    metadata:
+      labels: {{- $labels | nindent 8 }}
+    spec:
+      containers:
+        - name: mysql
+          image: {{ .Values.mysql.image }}
+          ports: [ { containerPort: 3306 } ]
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: MYSQL_ROOT_PASSWORD } }
+            - name: MYSQL_USER
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: DB_USERNAME } }
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: DB_PASSWORD } }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/mysql }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          readinessProbe:
+            exec: { command: [ "sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p$MYSQL_ROOT_PASSWORD" ] }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 1Gi }
+      volumes:
+        - name: init
+          configMap: { name: mysql-init }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ ReadWriteOnce ]
+        resources: { requests: { storage: {{ .Values.mysql.storage }} } }
+{{- end }}

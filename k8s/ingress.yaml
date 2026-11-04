@@ -1,0 +1,16 @@
+# Optional: http://orderflow.localhost through an ingress controller (ingress-nginx).
+# Without a controller installed this object is simply ignored; use the gateway's LoadBalancer on :8080.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orderflow
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: orderflow.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: api-gateway, port: { number: 8080 } }

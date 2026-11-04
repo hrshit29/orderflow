@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  labels: { app: order-service }
+spec:
+  type: ClusterIP      # reachable only inside the cluster
+  selector: { app: order-service }
+  ports: [ { name: http, port: 8082, targetPort: 8082 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  labels: { app: order-service, part-of: orderflow }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: order-service }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }   # zero-downtime deploys
+  template:
+    metadata:
+      labels: { app: order-service, part-of: orderflow }
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-dependencies
+          image: busybox:1.36
+          command: [ "sh", "-c", "until nc -z mysql 3306 && nc -z kafka 29092; do echo waiting for mysql and kafka; sleep 3; done" ]
+      containers:
+        - name: order-service
+          image: orderflow-order-service:latest      # built locally by `docker compose build`
+          imagePullPolicy: IfNotPresent       # use the local image, don't pull from a registry
+          ports: [ { containerPort: 8082 } ]
+          env:
+            - { name: DB_URL, value: "jdbc:mysql://mysql:3306/order_db" }
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              valueFrom: { configMapKeyRef: { name: orderflow-config, key: KAFKA_BOOTSTRAP_SERVERS } }
+            - name: ORDER_SAGA_TIMEOUT
+              valueFrom: { configMapKeyRef: { name: orderflow-config, key: ORDER_SAGA_TIMEOUT } }
+            - name: DB_USERNAME
+              valueFrom: { secretKeyRef: { name: orderflow-secrets, key: DB_USERNAME } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: orderflow-secrets, key: DB_PASSWORD } }
+          # Spring Boot exposes these when management.endpoint.health.probes.enabled=true
+          startupProbe:          # up to 3 min to boot before liveness kicks in
+            httpGet: { path: /actuator/health/liveness, port: 8082 }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:         # restart the container if the JVM is wedged
+            httpGet: { path: /actuator/health/liveness, port: 8082 }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:        # only send traffic once DB/Kafka connections are up
+            httpGet: { path: /actuator/health/readiness, port: 8082 }
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 200m, memory: 384Mi }
+            limits: { memory: 768Mi }       # JVM uses 75% of this (MaxRAMPercentage in the Dockerfile)
+---
+# Needs metrics-server (see k8s/README.md). Scales on CPU between 2 and 4 pods.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: order-service
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: order-service }
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

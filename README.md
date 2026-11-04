@@ -123,6 +123,14 @@ curl -s 'localhost:8085/api/v1/notifications?status=FAILED'
 docker compose start mailpit
 ```
 
+## Run it on Kubernetes (Phase 4)
+
+`docker compose build && docker compose down && kubectl apply -k k8s` — details in [k8s/README.md](k8s/README.md). Only the gateway is exposed (`localhost:8080`); every other service is cluster-internal.
+
+Or with Helm, where one template renders all six services from `values.yaml`:
+`helm upgrade --install orderflow helm/orderflow -n orderflow --create-namespace`.
+[`values-prod.example.yaml`](helm/orderflow/values-prod.example.yaml) shows a production setup: managed MySQL and Kafka, a registry image with a fixed version tag, an externally managed secret, and an Ingress.
+
 ## Tests
 ```bash
 mvn test
@@ -134,5 +142,6 @@ Unit tests cover: password hashing + event publishing, duplicate email, order to
 - [x] **Phase 1** — User, Order, Notification services · Kafka · retry/DLQ · pagination · Swagger · Docker Compose
 - [x] **Phase 2** — Inventory + Payment services (full saga: `order-created → stock-reserved → payment-success/failed`), compensation (restock on cancel)
 - [x] **Phase 3** — Spring Cloud Gateway + JWT auth, role checks, per-user data ownership, aggregated Swagger (Eureka deliberately skipped, see above)
-- [ ] **Phase 4** — Kubernetes manifests (Deployments, Services, ConfigMaps/Secrets, Ingress, HPA, probes), then Helm
+- [x] **Phase 4a** — Kubernetes manifests (Deployments, StatefulSets + PVCs, Services, ConfigMap/Secret, Ingress, HPA, probes, init containers)
+- [x] **Phase 4b** — Helm chart (one templated Deployment/Service/HPA for every service, toggleable bundled infra, per-environment values)
 - [ ] **Phase 5** — Flyway migrations, Testcontainers integration tests, transactional outbox, Prometheus + Grafana, keyset pagination

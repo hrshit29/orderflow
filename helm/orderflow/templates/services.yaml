@@ -1,0 +1,109 @@
+{{- /* One Service + Deployment (+ HPA) per entry in .Values.services */}}
+{{- $secret := include "orderflow.secretName" . }}
+{{- range $name, $svc := .Values.services }}
+{{- $labels := include "orderflow.labels" (dict "name" $name "root" $) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- $labels | nindent 4 }}
+spec:
+  type: {{ $svc.serviceType | default "ClusterIP" }}
+  selector:
+    app: {{ $name }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- $labels | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    metadata:
+      labels: {{- $labels | nindent 8 }}
+      annotations:
+        # roll pods when config/secret values change
+        checksum/values: {{ toJson $svc | sha256sum | trunc 16 | quote }}
+    spec:
+      enableServiceLinks: false
+      {{- $waitFor := $svc.waitFor }}
+      {{- if and (not $waitFor) $svc.database }}
+      {{- $waitFor = list (printf "%s:3306" $.Values.mysql.host) $.Values.kafka.bootstrapServers }}
+      {{- end }}
+      {{- if $waitFor }}
+      initContainers:
+        - name: wait-for-dependencies
+          image: busybox:1.36
+          {{- $checks := list }}
+          {{- range $waitFor }}{{ $checks = append $checks (printf "nc -z %s" (replace ":" " " .)) }}{{ end }}
+          command: [ "sh", "-c", "until {{ join " && " $checks }}; do echo waiting for {{ join ", " $waitFor }}; sleep 3; done" ]
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "orderflow.image" (dict "name" $name "root" $) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ $svc.port }}
+          env:
+            {{- if $svc.database }}
+            - name: DB_URL
+              value: "jdbc:mysql://{{ $.Values.mysql.host }}:3306/{{ $svc.database }}"
+            - name: DB_USERNAME
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: DB_USERNAME } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: DB_PASSWORD } }
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: {{ $.Values.kafka.bootstrapServers | quote }}
+            {{- end }}
+            {{- range $k, $v := $svc.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- range $svc.secretEnv }}
+            - name: {{ . }}
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: {{ . }} } }
+            {{- end }}
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: {{ $svc.port }} }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: {{ $svc.port }} }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: {{ $svc.port }} }
+            periodSeconds: 5
+            failureThreshold: 3
+          resources: {{- toYaml ($svc.resources | default $.Values.defaults.resources) | nindent 12 }}
+{{- if $svc.autoscaling }}
+{{- $as := $.Values.defaults.autoscaling }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels: {{- $labels | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }} }
+  minReplicas: {{ $as.minReplicas }}
+  maxReplicas: {{ $as.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ $as.targetCPUUtilizationPercentage }} }
+{{- end }}
+{{- end }}

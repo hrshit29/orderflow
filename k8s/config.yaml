@@ -1,0 +1,31 @@
+# Non-secret settings shared by every service.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orderflow-config
+data:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  MAIL_HOST: mailpit
+  MAIL_PORT: "1025"
+  NOTIFICATION_CHANNEL: email
+  PAYMENT_DECLINE_ABOVE: "10000"
+  ORDER_SAGA_TIMEOUT: 15m
+  USER_SERVICE_URL: http://user-service:8081
+  ORDER_SERVICE_URL: http://order-service:8082
+  INVENTORY_SERVICE_URL: http://inventory-service:8083
+  PAYMENT_SERVICE_URL: http://payment-service:8084
+  NOTIFICATION_SERVICE_URL: http://notification-service:8085
+---
+# DEV VALUES ONLY. In a real cluster create this from a secret manager
+# (Sealed Secrets / External Secrets / Vault), never from a committed file.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orderflow-secrets
+type: Opaque
+stringData:
+  DB_USERNAME: orderflow
+  DB_PASSWORD: orderflow
+  MYSQL_ROOT_PASSWORD: root
+  JWT_SECRET: orderflow-local-dev-secret-change-me-32+bytes
+  ADMIN_PASSWORD: admin12345

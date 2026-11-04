@@ -1,0 +1,8 @@
+OrderFlow {{ .Chart.AppVersion }} installed in namespace {{ .Release.Namespace }}.
+
+Watch it start (2-3 min):   kubectl get pods -n {{ .Release.Namespace }} -w
+Gateway:                    http://localhost:{{ (index .Values.services "api-gateway").port }}  (Swagger: /swagger-ui.html)
+Admin login:                admin@orderflow.local / the ADMIN_PASSWORD in your secret
+{{- if .Values.mailpit.enabled }}
+Emails:                     kubectl port-forward -n {{ .Release.Namespace }} svc/mailpit 8025:8025  ->  http://localhost:8025
+{{- end }}
