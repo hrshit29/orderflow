@@ -17,6 +17,8 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
     @EntityGraph(attributePaths = "items")
     Optional<Order> findWithItemsById(Long id);
 
+    long countByStatus(OrderStatus status);
+
     /** Orders whose saga has stalled: still PENDING/CONFIRMED with no state change since {@code cutoff}. */
     List<Order> findTop100ByStatusInAndUpdatedAtBefore(Collection<OrderStatus> statuses, Instant cutoff);
 

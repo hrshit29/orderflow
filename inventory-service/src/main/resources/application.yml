@@ -8,9 +8,12 @@ spring:
     url: ${DB_URL:jdbc:mysql://localhost:3306/inventory_db?createDatabaseIfNotExist=true}
     username: ${DB_USERNAME:orderflow}
     password: ${DB_PASSWORD:orderflow}
+  flyway:
+    baseline-on-migrate: true   # databases created before Flyway: record them as version 1, skip V1
+    baseline-version: 1
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate   # Flyway owns the schema; Hibernate only checks the entities match it
     open-in-view: false
   data:
     web:
@@ -24,6 +27,11 @@ spring:
       acks: all
       properties:
         enable.idempotence: true
+        # Fail fast when the broker is down (default waits 60 s): the outbox relay records the
+        # attempt, releases its lock and retries on the next poll instead of hanging.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
     consumer:
       group-id: inventory-service
       auto-offset-reset: earliest
@@ -37,10 +45,16 @@ inventory:
   seed-demo-products: ${SEED_DEMO_PRODUCTS:true}   # inserts products 7, 101, 205 on an empty catalogue
 
 management:
+  metrics:
+    tags:
+      application: ${spring.application.name}   # every metric labelled with the service name
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true            # enables p95/p99 latency in Grafana
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:

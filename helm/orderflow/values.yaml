@@ -45,6 +45,7 @@ defaults:
 services:
   api-gateway:
     port: 8080
+    managementPort: 9091             # health + metrics, not exposed by the LoadBalancer
     serviceType: LoadBalancer        # the only service reachable from outside the cluster
     replicas: 2
     autoscaling: true
@@ -89,6 +90,16 @@ services:
       NOTIFICATION_CHANNEL: email
       MAIL_HOST: mailpit
       MAIL_PORT: "1025"
+
+# Prometheus (discovers every pod annotated prometheus.io/scrape) and Grafana with the OrderFlow dashboard.
+# Open with:  kubectl port-forward -n orderflow svc/grafana 3000:3000
+monitoring:
+  enabled: true
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    retention: 2d
+  grafana:
+    image: grafana/grafana:11.1.0
 
 ingress:
   enabled: false           # needs an ingress controller (ingress-nginx)

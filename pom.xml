@@ -19,6 +19,7 @@
 
     <modules>
         <module>common-events</module>
+        <module>common-outbox</module>
         <module>user-service</module>
         <module>order-service</module>
         <module>inventory-service</module>
@@ -39,6 +40,11 @@
             <dependency>
                 <groupId>com.orderflow</groupId>
                 <artifactId>common-events</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.orderflow</groupId>
+                <artifactId>common-outbox</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

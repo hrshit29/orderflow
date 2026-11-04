@@ -36,7 +36,7 @@ public class SecurityConfig {
                         // public
                         .pathMatchers(HttpMethod.POST, "/api/v1/users/register", "/api/v1/users/login").permitAll()
                         .pathMatchers(HttpMethod.GET, "/api/v1/products/**").permitAll()
-                        .pathMatchers("/actuator/health/**", "/swagger-ui.html", "/swagger-ui/**",
+                        .pathMatchers("/actuator/health/**", "/actuator/prometheus", "/swagger-ui.html", "/swagger-ui/**",
                                 "/webjars/**", "/docs/**", "/v3/api-docs/**").permitAll()
                         // admin only
                         .pathMatchers(HttpMethod.GET, "/api/v1/users").hasRole("ADMIN")

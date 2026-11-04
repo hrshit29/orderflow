@@ -1,6 +1,10 @@
 package com.orderflow.orderservice.config;
 
 import com.orderflow.events.Topics;
+import com.orderflow.orderservice.model.OrderStatus;
+import com.orderflow.orderservice.repository.OrderRepository;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.binder.MeterBinder;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
 import org.springframework.context.annotation.Bean;
@@ -16,6 +20,19 @@ import org.springframework.util.backoff.FixedBackOff;
 public class AppConfig {
 
     /** Creates every topic this service produces or consumes, so listeners start cleanly. */
+    /** orderflow_orders{status="PAID"} etc.: current number of orders in each status (read from the DB on scrape). */
+    @Bean
+    MeterBinder orderStatusGauges(OrderRepository orders) {
+        return registry -> {
+            for (OrderStatus status : OrderStatus.values()) {
+                Gauge.builder("orderflow.orders", orders, repo -> repo.countByStatus(status))
+                        .tag("status", status.name())
+                        .description("Orders currently in this status")
+                        .register(registry);
+            }
+        };
+    }
+
     @Bean
     KafkaAdmin.NewTopics orderTopics() {
         return new KafkaAdmin.NewTopics(

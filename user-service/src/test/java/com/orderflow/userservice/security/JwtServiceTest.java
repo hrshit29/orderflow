@@ -25,7 +25,7 @@ class JwtServiceTest {
 
         assertThat(jwt.getSubject()).isEqualTo("42");
         assertThat(jwt.getClaimAsString("role")).isEqualTo("CUSTOMER");
-        assertThat(jwt.getIssuer().toString()).isEqualTo("orderflow");
+        assertThat(jwt.getClaimAsString("iss")).isEqualTo("orderflow");   // getIssuer() expects a URL
         assertThat(jwt.getExpiresAt()).isAfter(Instant.now().plusSeconds(3500));
     }
 

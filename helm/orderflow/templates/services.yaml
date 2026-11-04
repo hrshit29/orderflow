@@ -2,6 +2,7 @@
 {{- $secret := include "orderflow.secretName" . }}
 {{- range $name, $svc := .Values.services }}
 {{- $labels := include "orderflow.labels" (dict "name" $name "root" $) }}
+{{- $mport := $svc.managementPort | default $svc.port }}
 ---
 apiVersion: v1
 kind: Service
@@ -36,6 +37,9 @@ spec:
       annotations:
         # roll pods when config/secret values change
         checksum/values: {{ toJson $svc | sha256sum | trunc 16 | quote }}
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: {{ $mport | quote }}
     spec:
       enableServiceLinks: false
       {{- $waitFor := $svc.waitFor }}
@@ -55,7 +59,10 @@ spec:
           image: {{ include "orderflow.image" (dict "name" $name "root" $) }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           ports:
-            - containerPort: {{ $svc.port }}
+            - { name: http, containerPort: {{ $svc.port }} }
+            {{- if ne (int $mport) (int $svc.port) }}
+            - { name: management, containerPort: {{ $mport }} }
+            {{- end }}
           env:
             {{- if $svc.database }}
             - name: DB_URL
@@ -76,15 +83,15 @@ spec:
               valueFrom: { secretKeyRef: { name: {{ $secret }}, key: {{ . }} } }
             {{- end }}
           startupProbe:
-            httpGet: { path: /actuator/health/liveness, port: {{ $svc.port }} }
+            httpGet: { path: /actuator/health/liveness, port: {{ $mport }} }
             periodSeconds: 5
             failureThreshold: 36
           livenessProbe:
-            httpGet: { path: /actuator/health/liveness, port: {{ $svc.port }} }
+            httpGet: { path: /actuator/health/liveness, port: {{ $mport }} }
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:
-            httpGet: { path: /actuator/health/readiness, port: {{ $svc.port }} }
+            httpGet: { path: /actuator/health/readiness, port: {{ $mport }} }
             periodSeconds: 5
             failureThreshold: 3
           resources: {{- toYaml ($svc.resources | default $.Values.defaults.resources) | nindent 12 }}

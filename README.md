@@ -16,6 +16,7 @@ client ──► user-service (8081) ──► user-registered ─────�
 | Module | What it does |
 |---|---|
 | `api-gateway` | Port 8080, the single entry point. Verifies JWTs, enforces roles (admin-only routes), strips spoofed `X-User-*` headers and forwards the caller's id/role, routes to each service, serves one Swagger UI for all services |
+| `common-outbox` | Shared library (Spring Boot auto-configuration). Services write events to an `outbox_events` table inside the business transaction; `OutboxRelay` publishes them to Kafka |
 | `common-events` | Event records, topic names, shared `PageResponse` — the contract between services |
 | `user-service` | Register / login (issues a JWT: `sub`=user id, `role`=CUSTOMER/ADMIN, 1 h) / `GET /me` / get / update / delete / paginated search. BCrypt passwords. Publishes `user-registered` |
 | `order-service` | Create / get / cancel / paginated list filtered by user, status, date range. Publishes `order-created`, `order-cancelled`. Consumes `stock-*` and `payment-*` (ready for Phase 2) |
@@ -25,7 +26,7 @@ client ──► user-service (8081) ──► user-registered ─────�
 
 ## Design decisions worth talking about in interviews
 
-- **Events published after commit** — `@TransactionalEventListener(AFTER_COMMIT)`: a rolled-back DB write never emits an event. Next step: transactional outbox for guaranteed delivery.
+- **Transactional outbox** — the event row is written to `outbox_events` in the same transaction as the business change (`@TransactionalEventListener(BEFORE_COMMIT)`), so a rolled-back write never emits an event and a committed one can't be lost. `OutboxRelay` polls every 500 ms and publishes in id order. It uses `SELECT … FOR UPDATE` rather than `SKIP LOCKED`, so two replicas can't reorder events for the same key. A failed send stops the batch so nothing overtakes it. Delivery is at-least-once; every consumer is idempotent. (The previous version published after commit, and a crash in that gap lost the event — that's how one order got stuck in `PENDING`.)
 - **Events keyed by entity id** — all events for one order land on one partition, so they're consumed in order.
 - **Idempotent consumers** — Kafka is at-least-once. Order state transitions check current status; notifications use a unique `eventKey` (`order-created:42`) so a redelivered event never sends a second email.
 - **Optimistic locking** (`@Version`) on `Order` — a user cancel and a Kafka consumer can't silently overwrite each other.
@@ -40,6 +41,7 @@ client ──► user-service (8081) ──► user-registered ─────�
 - **Gateway call outside the DB transaction** — Payment writes a `PENDING` row (unique per order), calls the gateway with no locks held, then records the outcome. A crash or timeout leaves `PENDING`; the Kafka retry reuses the same idempotency key (`order-{id}`), so a customer is never charged twice.
 - **Cancel vs. charge races** — cancel before charge: tombstone, never charged. Cancel mid-charge: row flips to `CANCELLED` and the completed charge is refunded instead of publishing success. Cancel after charge: refunded.
 - **Saga never stalls** — if the gateway stays down through all retries (1s/2s/4s), the recoverer fails the payment and publishes `payment-failed`, so the order is cancelled and stock released instead of sitting in `CONFIRMED`. Known gap: a timed-out charge may have succeeded at the gateway; production adds a reconciliation job.
+- **Flyway migrations** — `ddl-auto: validate`: Hibernate never changes the schema, it only checks the entities match it at startup. `V1__baseline` was taken from the live schema; existing databases are recorded as version 1 (`baseline-on-migrate`) instead of being recreated.
 - **Saga timeout** — a scheduled job in Order Service cancels any order stuck in `PENDING`/`CONFIRMED` for 15 min (lost event, a service down longer than Kafka's 7-day retention). The cancel publishes `order-cancelled`, so stock and payment are compensated as usual.
 - **Authentication at the edge, ownership in the service** — the gateway verifies the JWT (signature, expiry, issuer) and handles role rules (e.g. only ADMIN can add products). It then forwards `X-User-Id`/`X-User-Role`, after deleting any the client sent. Each service enforces ownership with the shared `Caller` type: customers only see their own orders, payments and notifications; another user's order returns 404, not 403, so ids can't be probed.
 - **User id from the token, never the body** — `POST /orders` ignores `userId` in the payload when called through the gateway.
@@ -131,6 +133,17 @@ Or with Helm, where one template renders all six services from `values.yaml`:
 `helm upgrade --install orderflow helm/orderflow -n orderflow --create-namespace`.
 [`values-prod.example.yaml`](helm/orderflow/values-prod.example.yaml) shows a production setup: managed MySQL and Kafka, a registry image with a fixed version tag, an externally managed secret, and an Ingress.
 
+## Monitoring (Phase 5b)
+
+The Helm chart also deploys Prometheus and Grafana. Prometheus finds every pod with the `prometheus.io/scrape` annotation; Grafana opens on a ready-made **OrderFlow** dashboard.
+
+```powershell
+kubectl port-forward -n orderflow svc/grafana 3000:3000      # http://localhost:3000
+kubectl port-forward -n orderflow svc/prometheus 9090:9090   # http://localhost:9090/targets
+```
+
+The dashboard shows orders by status, pods up per service, requests/s, p95 latency, 4xx/5xx rates, **outbox events waiting for Kafka**, **Kafka consumer lag**, JVM heap and CPU. Stop Kafka and the outbox panel climbs; start it again and the panel drains to zero. The gateway serves its metrics and health on a separate port (9091), so they're never public through the LoadBalancer.
+
 ## Tests
 ```bash
 mvn test
@@ -144,4 +157,5 @@ Unit tests cover: password hashing + event publishing, duplicate email, order to
 - [x] **Phase 3** — Spring Cloud Gateway + JWT auth, role checks, per-user data ownership, aggregated Swagger (Eureka deliberately skipped, see above)
 - [x] **Phase 4a** — Kubernetes manifests (Deployments, StatefulSets + PVCs, Services, ConfigMap/Secret, Ingress, HPA, probes, init containers)
 - [x] **Phase 4b** — Helm chart (one templated Deployment/Service/HPA for every service, toggleable bundled infra, per-environment values)
-- [ ] **Phase 5** — Flyway migrations, Testcontainers integration tests, transactional outbox, Prometheus + Grafana, keyset pagination
+- [x] **Phase 5a** — Flyway migrations, transactional outbox
+- [ ] **Phase 5b** — Testcontainers integration tests, Prometheus + Grafana

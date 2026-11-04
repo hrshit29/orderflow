@@ -33,7 +33,7 @@ spec:
         - name: api-gateway
           image: orderflow-api-gateway:latest      # built locally by `docker compose build`
           imagePullPolicy: IfNotPresent       # use the local image, don't pull from a registry
-          ports: [ { containerPort: 8080 } ]
+          ports: [ { containerPort: 8080 }, { name: management, containerPort: 9091 } ]   # 9091: health + metrics, not exposed
           env:
             - name: USER_SERVICE_URL
               valueFrom: { configMapKeyRef: { name: orderflow-config, key: USER_SERVICE_URL } }
@@ -49,15 +49,15 @@ spec:
               valueFrom: { secretKeyRef: { name: orderflow-secrets, key: JWT_SECRET } }
           # Spring Boot exposes these when management.endpoint.health.probes.enabled=true
           startupProbe:          # up to 3 min to boot before liveness kicks in
-            httpGet: { path: /actuator/health/liveness, port: 8080 }
+            httpGet: { path: /actuator/health/liveness, port: 9091 }
             periodSeconds: 5
             failureThreshold: 36
           livenessProbe:         # restart the container if the JVM is wedged
-            httpGet: { path: /actuator/health/liveness, port: 8080 }
+            httpGet: { path: /actuator/health/liveness, port: 9091 }
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:        # only send traffic once DB/Kafka connections are up
-            httpGet: { path: /actuator/health/readiness, port: 8080 }
+            httpGet: { path: /actuator/health/readiness, port: 9091 }
             periodSeconds: 5
             failureThreshold: 3
           resources:

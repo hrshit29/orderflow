@@ -61,10 +61,20 @@ springdoc:
       - { name: notification-service, url: /docs/notification-service }
 
 management:
+  metrics:
+    tags:
+      application: ${spring.application.name}   # every metric labelled with the service name
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true            # enables p95/p99 latency in Grafana
+  server:
+    # Actuator (health probes, /actuator/prometheus) on its own port, so metrics are never
+    # reachable through the public LoadBalancer on 8080.
+    port: ${MANAGEMENT_PORT:9091}
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
