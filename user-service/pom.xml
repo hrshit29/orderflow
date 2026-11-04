@@ -40,6 +40,12 @@
             <artifactId>spring-security-crypto</artifactId>
         </dependency>
         <dependency>
+            <!-- JWT signing only (NimbusJwtEncoder). Not the full Spring Security web stack:
+                 the gateway authenticates requests, this service just issues tokens. -->
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
         </dependency>

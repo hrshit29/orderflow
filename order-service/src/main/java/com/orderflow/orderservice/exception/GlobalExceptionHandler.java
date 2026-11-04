@@ -23,6 +23,11 @@ public class GlobalExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    ProblemDetail badRequest(IllegalArgumentException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
     @ExceptionHandler(org.springframework.orm.ObjectOptimisticLockingFailureException.class)
     ProblemDetail concurrentUpdate(Exception ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Order was modified concurrently, retry");

@@ -1,4 +1,4 @@
-# OrderFlow — Event-Driven Microservices (Phase 1)
+# OrderFlow — Event-Driven Microservices (Phases 1–3)
 
 Spring Boot 3.4 · Java 21 · Kafka (KRaft) · MySQL 8 · Docker Compose · Springdoc OpenAPI
 
@@ -15,8 +15,9 @@ client ──► user-service (8081) ──► user-registered ─────�
 
 | Module | What it does |
 |---|---|
+| `api-gateway` | Port 8080, the single entry point. Verifies JWTs, enforces roles (admin-only routes), strips spoofed `X-User-*` headers and forwards the caller's id/role, routes to each service, serves one Swagger UI for all services |
 | `common-events` | Event records, topic names, shared `PageResponse` — the contract between services |
-| `user-service` | Register / login / get / update / delete / paginated search. BCrypt passwords. Publishes `user-registered` |
+| `user-service` | Register / login (issues a JWT: `sub`=user id, `role`=CUSTOMER/ADMIN, 1 h) / `GET /me` / get / update / delete / paginated search. BCrypt passwords. Publishes `user-registered` |
 | `order-service` | Create / get / cancel / paginated list filtered by user, status, date range. Publishes `order-created`, `order-cancelled`. Consumes `stock-*` and `payment-*` (ready for Phase 2) |
 | `inventory-service` | Products + stock. Consumes `order-created` → reserves every line or nothing (row lock, `SELECT … FOR UPDATE`) → publishes `stock-reserved` / `stock-insufficient`. Consumes `order-cancelled` → puts reserved stock back. Seeds demo products 7, 101, 205 |
 | `payment-service` | Consumes `stock-reserved` → charges a simulated gateway (declines above Rs. 10,000; outage switch for demos) → publishes `payment-success` / `payment-failed`. Consumes `order-cancelled` → refunds a charged order, or never charges one cancelled first |
@@ -40,6 +41,10 @@ client ──► user-service (8081) ──► user-registered ─────�
 - **Cancel vs. charge races** — cancel before charge: tombstone, never charged. Cancel mid-charge: row flips to `CANCELLED` and the completed charge is refunded instead of publishing success. Cancel after charge: refunded.
 - **Saga never stalls** — if the gateway stays down through all retries (1s/2s/4s), the recoverer fails the payment and publishes `payment-failed`, so the order is cancelled and stock released instead of sitting in `CONFIRMED`. Known gap: a timed-out charge may have succeeded at the gateway; production adds a reconciliation job.
 - **Saga timeout** — a scheduled job in Order Service cancels any order stuck in `PENDING`/`CONFIRMED` for 15 min (lost event, a service down longer than Kafka's 7-day retention). The cancel publishes `order-cancelled`, so stock and payment are compensated as usual.
+- **Authentication at the edge, ownership in the service** — the gateway verifies the JWT (signature, expiry, issuer) and handles role rules (e.g. only ADMIN can add products). It then forwards `X-User-Id`/`X-User-Role`, after deleting any the client sent. Each service enforces ownership with the shared `Caller` type: customers only see their own orders, payments and notifications; another user's order returns 404, not 403, so ids can't be probed.
+- **User id from the token, never the body** — `POST /orders` ignores `userId` in the payload when called through the gateway.
+- **HS256 shared secret** — simple and fine for one issuer. Upgrade path: RS256 + JWKS so the gateway holds only the public key.
+- **No Eureka** — Docker Compose DNS (and Kubernetes Services in Phase 4) already resolve `order-service:8082`; a registry would be one more thing to run for no gain.
 - **Kubernetes-ready probes** — `/actuator/health/liveness` and `/readiness` are enabled.
 
 ## Run it
@@ -59,6 +64,7 @@ mvn clean install
 
 | URL | |
 |---|---|
+| http://localhost:8080/swagger-ui.html | **Gateway — Swagger UI for every service** (pick one top-right; click Authorize and paste a token) |
 | http://localhost:8081/swagger-ui.html | User Service API |
 | http://localhost:8082/swagger-ui.html | Order Service API |
 | http://localhost:8083/swagger-ui.html | Inventory Service API |
@@ -67,7 +73,21 @@ mvn clean install
 | http://localhost:8090 | Kafka UI — topics, messages, consumer groups, DLQ |
 | http://localhost:8025 | Mailpit — emails that were "sent" |
 
-## Try the flow
+## Try it through the gateway (Phase 3)
+
+```powershell
+# log in (admin is seeded: admin@orderflow.local / admin12345), or register then log in as a customer
+$t = (Invoke-RestMethod -Method Post http://localhost:8080/api/v1/users/login -ContentType 'application/json' -Body '{"email":"saurabh@example.com","password":"password123"}').accessToken
+$h = @{ Authorization = "Bearer $t" }
+
+Invoke-RestMethod http://localhost:8080/api/v1/users/me -Headers $h
+Invoke-RestMethod -Method Post http://localhost:8080/api/v1/orders -Headers $h -ContentType 'application/json' -Body '{"items":[{"productId":7,"quantity":1,"unitPrice":10}]}'
+Invoke-RestMethod http://localhost:8080/api/v1/orders -Headers $h          # only your orders
+Invoke-RestMethod http://localhost:8080/api/v1/orders                      # 401: no token
+Invoke-RestMethod http://localhost:8080/api/v1/users -Headers $h           # 403: admin only
+```
+
+## Try the flow (calling services directly, bypassing the gateway)
 
 ```bash
 # 1. Register -> welcome email appears in Mailpit
@@ -113,6 +133,6 @@ Unit tests cover: password hashing + event publishing, duplicate email, order to
 
 - [x] **Phase 1** — User, Order, Notification services · Kafka · retry/DLQ · pagination · Swagger · Docker Compose
 - [x] **Phase 2** — Inventory + Payment services (full saga: `order-created → stock-reserved → payment-success/failed`), compensation (restock on cancel)
-- [ ] **Phase 3** — Spring Cloud Gateway + JWT auth, Eureka, aggregated Swagger
+- [x] **Phase 3** — Spring Cloud Gateway + JWT auth, role checks, per-user data ownership, aggregated Swagger (Eureka deliberately skipped, see above)
 - [ ] **Phase 4** — Kubernetes manifests (Deployments, Services, ConfigMaps/Secrets, Ingress, HPA, probes), then Helm
 - [ ] **Phase 5** — Flyway migrations, Testcontainers integration tests, transactional outbox, Prometheus + Grafana, keyset pagination

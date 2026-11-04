@@ -21,6 +21,16 @@ spring:
       properties:
         enable.idempotence: true
 
+security:
+  jwt:
+    # Shared HS256 secret, also configured on the API gateway. At least 32 bytes. Override in every real environment.
+    secret: ${JWT_SECRET:orderflow-local-dev-secret-change-me-32+bytes}
+    issuer: orderflow
+    ttl: ${JWT_TTL:1h}
+  admin:   # created on startup if missing
+    email: ${ADMIN_EMAIL:admin@orderflow.local}
+    password: ${ADMIN_PASSWORD:admin12345}
+
 management:
   endpoints:
     web:

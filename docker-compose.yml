@@ -6,6 +6,7 @@ x-service-env: &service-env
   DB_USERNAME: orderflow
   DB_PASSWORD: orderflow
   KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  JWT_SECRET: orderflow-local-dev-secret-change-me-32+bytes   # shared by user-service (signs) and api-gateway (verifies)
 
 x-service-deps: &service-deps
   mysql:
@@ -126,6 +127,23 @@ services:
       <<: *service-deps
       mailpit:
         condition: service_started
+
+  api-gateway:   # the one door in: http://localhost:8080 (Swagger UI for every service at /swagger-ui.html)
+    build: { context: ., args: { SERVICE: api-gateway } }
+    ports: ["8080:8080"]
+    environment:
+      JWT_SECRET: orderflow-local-dev-secret-change-me-32+bytes
+      USER_SERVICE_URL: http://user-service:8081
+      ORDER_SERVICE_URL: http://order-service:8082
+      INVENTORY_SERVICE_URL: http://inventory-service:8083
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      NOTIFICATION_SERVICE_URL: http://notification-service:8085
+    depends_on:
+      - user-service
+      - order-service
+      - inventory-service
+      - payment-service
+      - notification-service
 
 volumes:
   mysql-data:

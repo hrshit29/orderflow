@@ -21,9 +21,14 @@ public final class OrderDtos {
             @NotNull @DecimalMin(value = "0.01") BigDecimal unitPrice) {
     }
 
+    /** userId is taken from the JWT when called through the gateway; only internal callers must send it. */
     public record OrderRequest(
-            @NotNull Long userId,
+            Long userId,
             @NotEmpty @Size(max = 50) List<@Valid OrderItemRequest> items) {
+
+        public OrderRequest withUserId(Long id) {
+            return new OrderRequest(id, items);
+        }
     }
 
     public record CancelRequest(@Size(max = 255) String reason) {

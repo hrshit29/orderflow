@@ -35,4 +35,7 @@ public final class UserDtos {
                     u.getRole().name(), u.getCreatedAt());
         }
     }
+
+    public record LoginResponse(String accessToken, String tokenType, long expiresIn, UserResponse user) {
+    }
 }

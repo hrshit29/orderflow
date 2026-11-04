@@ -1,0 +1,71 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: users
+          uri: ${USER_SERVICE_URL:http://localhost:8081}
+          predicates: [ "Path=/api/v1/users/**" ]
+        - id: orders
+          uri: ${ORDER_SERVICE_URL:http://localhost:8082}
+          predicates: [ "Path=/api/v1/orders/**" ]
+        - id: inventory
+          uri: ${INVENTORY_SERVICE_URL:http://localhost:8083}
+          predicates: [ "Path=/api/v1/products/**,/api/v1/reservations/**" ]
+        - id: payments
+          uri: ${PAYMENT_SERVICE_URL:http://localhost:8084}
+          predicates: [ "Path=/api/v1/payments/**" ]
+        - id: notifications
+          uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8085}
+          predicates: [ "Path=/api/v1/notifications/**" ]
+        # OpenAPI specs for the aggregated Swagger UI: /docs/order-service -> order-service /v3/api-docs
+        - id: docs-users
+          uri: ${USER_SERVICE_URL:http://localhost:8081}
+          predicates: [ "Path=/docs/user-service" ]
+          filters: [ "SetPath=/v3/api-docs" ]
+        - id: docs-orders
+          uri: ${ORDER_SERVICE_URL:http://localhost:8082}
+          predicates: [ "Path=/docs/order-service" ]
+          filters: [ "SetPath=/v3/api-docs" ]
+        - id: docs-inventory
+          uri: ${INVENTORY_SERVICE_URL:http://localhost:8083}
+          predicates: [ "Path=/docs/inventory-service" ]
+          filters: [ "SetPath=/v3/api-docs" ]
+        - id: docs-payments
+          uri: ${PAYMENT_SERVICE_URL:http://localhost:8084}
+          predicates: [ "Path=/docs/payment-service" ]
+          filters: [ "SetPath=/v3/api-docs" ]
+        - id: docs-notifications
+          uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8085}
+          predicates: [ "Path=/docs/notification-service" ]
+          filters: [ "SetPath=/v3/api-docs" ]
+
+security:
+  jwt:
+    # Must match user-service. At least 32 bytes.
+    secret: ${JWT_SECRET:orderflow-local-dev-secret-change-me-32+bytes}
+    issuer: orderflow
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    urls:
+      - { name: user-service, url: /docs/user-service }
+      - { name: order-service, url: /docs/order-service }
+      - { name: inventory-service, url: /docs/inventory-service }
+      - { name: payment-service, url: /docs/payment-service }
+      - { name: notification-service, url: /docs/notification-service }
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
