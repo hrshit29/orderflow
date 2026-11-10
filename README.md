@@ -1,4 +1,4 @@
-# OrderFlow — Event-Driven Microservices (Phases 1–3)
+# OrderFlow — Event-Driven Microservices
 
 Spring Boot 3.4 · Java 21 · Kafka (KRaft) · MySQL 8 · Docker Compose · Springdoc OpenAPI
 
@@ -145,9 +145,16 @@ kubectl port-forward -n orderflow svc/prometheus 9090:9090   # http://localhost:
 The dashboard shows orders by status, pods up per service, requests/s, p95 latency, 4xx/5xx rates, **outbox events waiting for Kafka**, **Kafka consumer lag**, JVM heap and CPU. Stop Kafka and the outbox panel climbs; start it again and the panel drains to zero. The gateway serves its metrics and health on a separate port (9091), so they're never public through the LoadBalancer.
 
 ## Tests
+
 ```bash
-mvn test
+mvn test      # unit tests only, no Docker needed
+mvn verify    # also runs the *IT integration tests: real MySQL + Kafka via Testcontainers (Docker must be running)
 ```
+
+Integration tests (Testcontainers, `*IT.java`, run by failsafe):
+- `OrderFlowIT`: Flyway migrations apply and Hibernate validates the schema. A new order reaches Kafka through the outbox with the right `__TypeId__` header. `stock-reserved` then `payment-success` move an order to `PAID`. A customer gets 404 for someone else's order.
+- `StockReservationConcurrencyIT`: 10 concurrent orders race for 5 units and exactly 5 are reserved (`SELECT … FOR UPDATE` on real MySQL); a redelivered cancel returns stock once.
+
 Unit tests cover: password hashing + event publishing, duplicate email, order total calculation, illegal cancel, idempotent cancel on redelivered events, duplicate-notification suppression, retry propagation, unknown-user skip.
 
 ## Roadmap
@@ -158,4 +165,4 @@ Unit tests cover: password hashing + event publishing, duplicate email, order to
 - [x] **Phase 4a** — Kubernetes manifests (Deployments, StatefulSets + PVCs, Services, ConfigMap/Secret, Ingress, HPA, probes, init containers)
 - [x] **Phase 4b** — Helm chart (one templated Deployment/Service/HPA for every service, toggleable bundled infra, per-environment values)
 - [x] **Phase 5a** — Flyway migrations, transactional outbox
-- [ ] **Phase 5b** — Testcontainers integration tests, Prometheus + Grafana
+- [x] **Phase 5b** — Testcontainers integration tests, Prometheus + Grafana
