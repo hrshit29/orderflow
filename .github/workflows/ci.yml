@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & test (unit + Testcontainers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # verify = unit tests (surefire) + *IT integration tests (failsafe) against real MySQL/Kafka containers
+      - name: mvn verify
+        run: mvn -B -ntp verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
+
+  helm:
+    name: Lint Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint helm/orderflow
+      - name: Render with default and prod values
+        run: |
+          helm template orderflow helm/orderflow > /dev/null
+          helm template orderflow helm/orderflow -f helm/orderflow/values-prod.example.yaml > /dev/null
+
+  images:
+    name: Publish image (${{ matrix.service }})
+    needs: [ build, helm ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [ api-gateway, user-service, order-service, inventory-service, payment-service, notification-service ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: SERVICE=${{ matrix.service }}
+          push: true
+          # immutable commit tag for deploys (values-prod.example.yaml), plus latest for convenience
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/orderflow-${{ matrix.service }}:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/orderflow-${{ matrix.service }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

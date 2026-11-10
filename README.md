@@ -1,15 +1,42 @@
 # OrderFlow — Event-Driven Microservices
 
-Spring Boot 3.4 · Java 21 · Kafka (KRaft) · MySQL 8 · Docker Compose · Springdoc OpenAPI
+[![CI](https://github.com/hrshit29/orderflow/actions/workflows/ci.yml/badge.svg)](https://github.com/hrshit29/orderflow/actions/workflows/ci.yml)
 
+Spring Boot 3.4 · Java 21 · Spring Cloud Gateway · JWT · Kafka (KRaft) · MySQL 8 · Flyway · Docker · Kubernetes · Helm · Prometheus · Grafana · Testcontainers · GitHub Actions
+
+```mermaid
+flowchart LR
+    client([Client]) -->|JWT| gw[api-gateway :8080<br/>auth · roles · routing]
+    gw --> us[user-service]
+    gw --> os[order-service]
+    gw --> is[inventory-service]
+    gw --> ps[payment-service]
+    gw --> ns[notification-service]
+
+    os -- order-created --> K[(Kafka)]
+    K -- order-created --> is
+    is -- stock-reserved / stock-insufficient --> K
+    K -- stock-reserved --> ps
+    ps -- payment-success / payment-failed --> K
+    K -- stock-* / payment-* --> os
+    os -- order-cancelled --> K
+    K -- order-cancelled<br/>(compensation) --> is & ps
+    us -- user-registered --> K
+    K -- all events --> ns
+    ns -->|SMTP| mail[Mailpit]
+    ns -. after 3 retries .-> dlq[(notification-dlq)]
+
+    us & os & is & ps & ns --- db[(MySQL<br/>one schema per service)]
 ```
-client ──► user-service (8081) ──► user-registered ─────────┐
-       ──► order-service (8082) ──► order-created ──────────┤
-                    ▲               order-cancelled ────────┤──► notification-service (8085) ──► SMTP (Mailpit)
-                    │                                       │         │ retries 1s/2s/4s
-     stock-reserved / stock-insufficient / payment-*        │         └──► notification-dlq
-     (Phase 2: inventory + payment services)                │
-```
+
+Each service writes its events to an **outbox table** in the same DB transaction, and a relay publishes them to Kafka.
+
+## CI
+
+Every push runs [`ci.yml`](.github/workflows/ci.yml):
+- `mvn verify`: unit tests plus the Testcontainers integration tests on a fresh runner.
+- `helm lint` and a template render with both values files.
+- On `main`, all 6 images are published to GHCR, tagged with the commit SHA and `latest`.
 
 ## Modules
 
@@ -166,3 +193,4 @@ Unit tests cover: password hashing + event publishing, duplicate email, order to
 - [x] **Phase 4b** — Helm chart (one templated Deployment/Service/HPA for every service, toggleable bundled infra, per-environment values)
 - [x] **Phase 5a** — Flyway migrations, transactional outbox
 - [x] **Phase 5b** — Testcontainers integration tests, Prometheus + Grafana
+- [x] **CI** — GitHub Actions: build, test, Helm lint, publish images to GHCR
