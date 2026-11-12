@@ -8,7 +8,7 @@ ARG SERVICE
 WORKDIR /build
 COPY . .
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -B -q -pl ${SERVICE} -am package -DskipTests \
+    mvn -B -ntp -pl ${SERVICE} -am package -DskipTests \
  && cp ${SERVICE}/target/${SERVICE}-*-SNAPSHOT.jar /build/app.jar
 
 # ---------- runtime stage ----------

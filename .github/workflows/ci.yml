@@ -55,6 +55,7 @@ jobs:
       contents: read
       packages: write
     strategy:
+      fail-fast: false        # one image failing shouldn't cancel the other five
       matrix:
         service: [ api-gateway, user-service, order-service, inventory-service, payment-service, notification-service ]
     steps:
